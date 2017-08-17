@@ -65,12 +65,27 @@ module AnnotateModels
   # Don't show default value for these column types
   NO_DEFAULT_COL_TYPES = %w(json jsonb hstore).freeze
 
+  INDEX_CLAUSES = {
+    unique: {
+      default: 'UNIQUE',
+      markdown: '_unique_'
+    },
+    where: {
+      default: 'WHERE',
+      markdown: '_where_'
+    },
+    using: {
+      default: 'USING',
+      markdown: '_using_'
+    }
+  }.freeze
+
   class << self
     def annotate_pattern(options = {})
       if options[:wrapper_open]
-        return /(?:^\n?# (?:#{options[:wrapper_open]}).*\n?# (?:#{COMPAT_PREFIX}|#{COMPAT_PREFIX_MD}).*?\n(#.*\n)*\n*)|^\n?# (?:#{COMPAT_PREFIX}|#{COMPAT_PREFIX_MD}).*?\n(#.*\n)*\n*/
+        return /(?:^(\n|\r\n)?# (?:#{options[:wrapper_open]}).*(\n|\r\n)?# (?:#{COMPAT_PREFIX}|#{COMPAT_PREFIX_MD}).*?(\n|\r\n)(#.*(\n|\r\n))*(\n|\r\n)*)|^(\n|\r\n)?# (?:#{COMPAT_PREFIX}|#{COMPAT_PREFIX_MD}).*?(\n|\r\n)(#.*(\n|\r\n))*(\n|\r\n)*/
       end
-      /^\n?# (?:#{COMPAT_PREFIX}|#{COMPAT_PREFIX_MD}).*?\n(#.*\n)*\n*/
+      /^(\n|\r\n)?# (?:#{COMPAT_PREFIX}|#{COMPAT_PREFIX_MD}).*?(\n|\r\n)(#.*(\n|\r\n))*(\n|\r\n)*/
     end
 
     def model_dir
@@ -127,6 +142,8 @@ module AnnotateModels
         File.join(root_directory, FACTORY_GIRL_SPEC_DIR,  "%MODEL_NAME%_factory.rb"),    # (old style)
         File.join(root_directory, FACTORY_GIRL_TEST_DIR,  "%TABLE_NAME%.rb"),            # (new style)
         File.join(root_directory, FACTORY_GIRL_SPEC_DIR,  "%TABLE_NAME%.rb"),            # (new style)
+        File.join(root_directory, FACTORY_GIRL_TEST_DIR,  "%PLURALIZED_MODEL_NAME%.rb"), # (new style)
+        File.join(root_directory, FACTORY_GIRL_SPEC_DIR,  "%PLURALIZED_MODEL_NAME%.rb"), # (new style)
         File.join(root_directory, FABRICATORS_TEST_DIR,   "%MODEL_NAME%_fabricator.rb"),
         File.join(root_directory, FABRICATORS_SPEC_DIR,   "%MODEL_NAME%_fabricator.rb")
       ]
@@ -209,8 +226,8 @@ module AnnotateModels
 
       max_size = klass.column_names.map(&:size).max || 0
       with_comment = options[:with_comment] && klass.columns.first.respond_to?(:comment)
-      max_size = klass.columns.map{|col| col.name.size + col.comment.size }.max || 0 if with_comment
-      max_size += 2 if with_comment
+      max_size = klass.columns.map{|col| col.name.size + col.comment.size + klass.human_attribute_name(col.name).size  }.max || 0 if with_comment
+      max_size += 4 if with_comment
       max_size += options[:format_rdoc] ? 5 : 1
       md_names_overhead = 6
       md_type_allowance = 18
@@ -280,13 +297,27 @@ module AnnotateModels
                      col.name
                    end
         if options[:format_rdoc]
-          info << sprintf("# %-#{max_size}.#{max_size}s<tt>%s</tt>", "*#{col_name}*::", attrs.unshift(col_type).join(", ")).rstrip + "\n"
+          info << sprintf("\n# %-#{max_size}.#{max_size}s<tt>%s</tt>",
+                          "*#{col_name}*::",
+                          attrs.unshift(col_type).join(", ")
+                          ).rstrip + "\n"
         elsif options[:format_markdown]
           name_remainder = max_size - col_name.length
           type_remainder = (md_type_allowance - 2) - col_type.length
-          info << (sprintf("# **`%s`**%#{name_remainder}s | `%s`%#{type_remainder}s | `%s`", col_name, " ", col_type, " ", attrs.join(", ").rstrip)).gsub('``', '  ').rstrip + "\n"
+          info << (sprintf("# **`%s`**%#{name_remainder}s | `%s`%#{type_remainder}s | `%s`",
+                           col_name,
+                           " ",
+                           col_type,
+                           " ",
+                           attrs.join(", ").rstrip
+                           ) ).gsub('``', '  ').rstrip + "\n"
         else
-          info << sprintf("#  %-#{max_size}.#{max_size}s:%-#{bare_type_allowance}.#{bare_type_allowance}s %s", col_name, col_type, attrs.join(", ")).rstrip + "\n"
+          info << sprintf("# %-#{max_size}s:%-#{max_size}s%-#{max_size}s%s",
+                          col_name,
+                          col_type,
+                          klass.human_attribute_name(col_name),
+                          attrs.join(", ")
+                          ).rstrip + "\n"
         end
       end
 
@@ -337,13 +368,73 @@ module AnnotateModels
       max_size = indexes.collect{|index| index.name.size}.max + 1
       indexes.sort_by(&:name).each do |index|
         index_info << if options[:format_markdown]
-                        sprintf("# * `%s`%s:\n#     * **`%s`**\n", index.name, index.unique ? " (_unique_)" : "", Array(index.columns).join("`**\n#     * **`"))
+                        final_index_string_in_markdown(index)
                       else
-                        sprintf("#  %-#{max_size}.#{max_size}s %s %s", index.name, "(#{Array(index.columns).join(",")})", index.unique ? "UNIQUE" : "").rstrip + "\n"
+                        final_index_string(index, max_size)
                       end
       end
 
       index_info
+    end
+
+    def index_columns_info(index)
+      Array(index.columns).map do |col|
+        if index.try(:orders) && index.orders[col.to_s]
+          "#{col} #{index.orders[col.to_s].upcase}"
+        else
+          col.to_s
+        end
+      end
+    end
+
+    def index_unique_info(index, format = :default)
+      index.unique ? " #{INDEX_CLAUSES[:unique][format]}" : ''
+    end
+
+    def index_where_info(index, format = :default)
+      value = index.try(:where).try(:to_s)
+      if value.blank?
+        ''
+      else
+        " #{INDEX_CLAUSES[:where][format]} #{value}"
+      end
+    end
+
+    def index_using_info(index, format = :default)
+      value = index.try(:using) && index.using.try(:to_sym)
+      if !value.blank? && value != :btree
+        " #{INDEX_CLAUSES[:using][format]} #{value}"
+      else
+        ''
+      end
+    end
+
+    def final_index_string_in_markdown(index)
+      details = sprintf(
+        "%s%s%s",
+        index_unique_info(index, :markdown),
+        index_where_info(index, :markdown),
+        index_using_info(index, :markdown)
+      ).strip
+      details = " (#{details})" unless details.blank?
+
+      sprintf(
+        "# * `%s`%s:\n#     * **`%s`**\n",
+        index.name,
+        details,
+        index_columns_info(index).join("`**\n#     * **`")
+      )
+    end
+
+    def final_index_string(index, max_size)
+      sprintf(
+        "#  %-#{max_size}.#{max_size}s %s%s%s%s",
+        index.name,
+        "(#{index_columns_info(index).join(',')})",
+        index_unique_info(index),
+        index_where_info(index),
+        index_using_info(index)
+      ).rstrip + "\n"
     end
 
     def hide_limit?(col_type, options)
@@ -428,8 +519,7 @@ module AnnotateModels
         old_columns = old_header && old_header.scan(column_pattern).sort
         new_columns = new_header && new_header.scan(column_pattern).sort
 
-        magic_comment_matcher = Regexp.new(/(^#\s*encoding:.*\n)|(^# coding:.*\n)|(^# -\*- coding:.*\n)|(^# -\*- encoding\s?:.*\n)|(^#\s*frozen_string_literal:.+\n)|(^# -\*- frozen_string_literal\s*:.+-\*-\n)/)
-        magic_comments = old_content.scan(magic_comment_matcher).flatten.compact
+        magic_comments_block = magic_comments_as_string(old_content)
 
         if old_columns == new_columns && !options[:force]
           return false
@@ -447,13 +537,13 @@ module AnnotateModels
           # if there *was* no old schema info (no substitution happened) or :force was passed,
           # we simply need to insert it in correct position
           if new_content == old_content || options[:force]
-            old_content.sub!(magic_comment_matcher, '')
+            old_content.gsub!(magic_comment_matcher, '')
             old_content.sub!(annotate_pattern(options), '')
 
             new_content = if %w(after bottom).include?(options[position].to_s)
-                            magic_comments.join + (old_content.rstrip + "\n\n" + wrapped_info_block)
+                            magic_comments_block + (old_content.rstrip + "\n\n" + wrapped_info_block)
                           else
-                            magic_comments.join + wrapped_info_block + "\n" + old_content
+                            magic_comments_block + wrapped_info_block + "\n" + old_content
                           end
           end
 
@@ -462,6 +552,20 @@ module AnnotateModels
         end
       else
         false
+      end
+    end
+
+    def magic_comment_matcher
+      Regexp.new(/(^#\s*encoding:.*(?:\n|r\n))|(^# coding:.*(?:\n|\r\n))|(^# -\*- coding:.*(?:\n|\r\n))|(^# -\*- encoding\s?:.*(?:\n|\r\n))|(^#\s*frozen_string_literal:.+(?:\n|\r\n))|(^# -\*- frozen_string_literal\s*:.+-\*-(?:\n|\r\n))/)
+    end
+
+    def magic_comments_as_string(content)
+      magic_comments = content.scan(magic_comment_matcher).flatten.compact
+
+      if magic_comments.any?
+        magic_comments.join + "\n"
+      else
+        ''
       end
     end
 
@@ -613,7 +717,7 @@ module AnnotateModels
     # Retrieve loaded model class by path to the file where it's supposed to be defined.
     def get_loaded_model(model_path)
       ActiveSupport::Inflector.constantize(ActiveSupport::Inflector.camelize(model_path))
-    rescue
+    rescue StandardError, LoadError
       # Revert to the old way but it is not really robust
       ObjectSpace.each_object(::Class)
                  .select do |c|
