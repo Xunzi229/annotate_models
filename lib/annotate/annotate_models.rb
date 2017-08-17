@@ -296,16 +296,6 @@ module AnnotateModels
                    else
                      col.name
                    end
-        puts "----------------"
-          # p options[:format_rdoc]
-          # p col_name
-          # p col_type
-          # p attrs.unshift(col_type).join(", ")
-          # p klass.human_attribute_name(col_name)
-          # p options[:format_rdoc]
-          # p options[:format_markdown]
-          p max_size
-        puts "----------------"
         if options[:format_rdoc]
           info << sprintf("\n# %-#{max_size}.#{max_size}s<tt>%s</tt>",
                           "*#{col_name}*::",
@@ -329,7 +319,6 @@ module AnnotateModels
                           attrs.join(", ")
                           ).rstrip + "\n"
         end
-        puts "info: #{info}"
       end
 
       if options[:show_indexes] && klass.table_exists?
