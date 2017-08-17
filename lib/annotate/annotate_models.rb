@@ -226,8 +226,8 @@ module AnnotateModels
 
       max_size = klass.column_names.map(&:size).max || 0
       with_comment = options[:with_comment] && klass.columns.first.respond_to?(:comment)
-      max_size = klass.columns.map{|col| col.name.size + col.comment.size }.max || 0 if with_comment
-      max_size += 2 if with_comment
+      max_size = klass.columns.map{|col| col.name.size + col.comment.size + klass.human_attribute_name(col.name).size  }.max || 0 if with_comment
+      max_size += 4 if with_comment
       max_size += options[:format_rdoc] ? 5 : 1
       md_names_overhead = 6
       md_type_allowance = 18
@@ -296,15 +296,40 @@ module AnnotateModels
                    else
                      col.name
                    end
+        puts "----------------"
+          # p options[:format_rdoc]
+          # p col_name
+          # p col_type
+          # p attrs.unshift(col_type).join(", ")
+          # p klass.human_attribute_name(col_name)
+          # p options[:format_rdoc]
+          # p options[:format_markdown]
+          p max_size
+        puts "----------------"
         if options[:format_rdoc]
-          info << sprintf("# %-#{max_size}.#{max_size}s<tt>%s</tt>", "*#{col_name}*::", attrs.unshift(col_type).join(", ")).rstrip + "\n"
+          info << sprintf("\n# %-#{max_size}.#{max_size}s<tt>%s</tt>",
+                          "*#{col_name}*::",
+                          attrs.unshift(col_type).join(", ")
+                          ).rstrip + "\n"
         elsif options[:format_markdown]
           name_remainder = max_size - col_name.length
           type_remainder = (md_type_allowance - 2) - col_type.length
-          info << (sprintf("# **`%s`**%#{name_remainder}s | `%s`%#{type_remainder}s | `%s`", col_name, " ", col_type, " ", attrs.join(", ").rstrip)).gsub('``', '  ').rstrip + "\n"
+          info << (sprintf("# **`%s`**%#{name_remainder}s | `%s`%#{type_remainder}s | `%s`",
+                           col_name,
+                           " ",
+                           col_type,
+                           " ",
+                           attrs.join(", ").rstrip
+                           ) ).gsub('``', '  ').rstrip + "\n"
         else
-          info << sprintf("#  %-#{max_size}.#{max_size}s:%-#{bare_type_allowance}.#{bare_type_allowance}s %s", col_name, col_type, attrs.join(", ")).rstrip + "\n"
+          info << sprintf("# %-#{max_size}s:%-#{max_size}s%-#{max_size}s%s",
+                          col_name,
+                          col_type,
+                          klass.human_attribute_name(col_name),
+                          attrs.join(", ")
+                          ).rstrip + "\n"
         end
+        puts "info: #{info}"
       end
 
       if options[:show_indexes] && klass.table_exists?

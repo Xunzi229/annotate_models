@@ -1,4 +1,23 @@
-== Annotate (aka AnnotateModels)
+## Annotate
+
+根据gem (Annotate) 修改，原gem 地址
+    https://github.com/ctran/annotate_models
+
+The schema comment looks like this:
+    # == Schema Information
+    #
+    # Table name: articles
+    #
+    # id         :integer    ID         not null, primary key
+    # title      :string     文章标题
+    # content    :string     文章内容
+    # created_at :datetime   文章创建时间     not null
+    # updated_at :datetime   文章更新时间     not null
+    #
+Into Gemfile from Github:
+    gem 'annotate', git: 'https://github.com/Xunzi229/annotate_models.git', require: false
+
+== 原gemdoc Annotate (aka AnnotateModels)
 
 {<img src="https://badge.fury.io/rb/annotate.svg" alt="Gem Version" />}[http://badge.fury.io/rb/annotate]
 {<img src="https://img.shields.io/gem/dt/annotate.svg?style=flat" />}[https://rubygems.org/gems/annotate]
